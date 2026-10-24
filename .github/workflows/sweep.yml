@@ -1,0 +1,49 @@
+# Journey sweep ping — production workflow (R8 design).
+#
+# Deploy: copy this file to `.github/workflows/sweep.yml` in a tiny PUBLIC
+# scheduler repo, then add the repo secrets API_URL and SWEEP_SECRET
+# (see modules/scheduler/README.md).
+#
+# Behavior: POSTs the engine's /api/sweep every 10 minutes (UTC, offset from
+# the top of the hour because GitHub queues scheduled jobs at minute 0 and may
+# drop them under load). Fails on any non-2xx or network error — a red run
+# emails the default workflow-failure notification. Public repos have
+# unlimited standard-runner minutes, so this costs $0.
+
+name: Journey sweep ping
+
+on:
+  schedule:
+    # Every 10 minutes, offset from the top of the hour. Times are UTC.
+    - cron: '4,14,24,34,44,54 * * * *'
+  workflow_dispatch: {} # manual "Run workflow" button for testing
+
+permissions: {} # the job needs zero repository access
+
+concurrency:
+  group: journey-sweep-ping
+  cancel-in-progress: false # don't drop a delayed sweep; timeout-minutes caps pile-ups
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: POST /api/sweep
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          SWEEP_SECRET: ${{ secrets.SWEEP_SECRET }}
+        run: |
+          code=$(curl -sS \
+            --connect-timeout 10 --max-time 30 \
+            --retry 1 --retry-delay 5 --retry-all-errors \
+            -o /dev/null -w '%{http_code}' \
+            -X POST "${API_URL}/api/sweep" \
+            -H "Authorization: Bearer ${SWEEP_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          echo "sweep responded HTTP ${code}"
+          case "$code" in
+            2*) exit 0 ;;
+            *)  echo "::error::sweep failed with HTTP ${code}"; exit 1 ;;
+          esac
