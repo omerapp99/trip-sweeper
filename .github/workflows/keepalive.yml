@@ -1,0 +1,33 @@
+# Keepalive — resets GitHub's 60-day public-repo inactivity clock.
+#
+# GitHub auto-disables scheduled workflows in a PUBLIC repo after 60 days
+# without commits. This workflow pushes an empty commit weekly, so the repo
+# never goes inactive and the sweep schedule (sweep.yml) never dies silently.
+# GITHUB_TOKEN pushes do not trigger other workflows, so this cannot recurse.
+
+name: Keepalive (60-day inactivity reset)
+
+on:
+  schedule:
+    - cron: '23 4 * * 1' # weekly, Monday 04:23 UTC (offset from the hour)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Empty commit + push
+        run: |
+          git config user.name "keepalive-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keepalive — reset 60-day inactivity clock"
+          git push
